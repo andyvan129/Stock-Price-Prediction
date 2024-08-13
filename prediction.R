@@ -6,3 +6,5 @@ for (pack in packages) {
   if (!require(pack, character.only = TRUE)) install.packages(pack)
   library(pack, character.only = TRUE)
 }
+
+# setting up git
