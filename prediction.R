@@ -7,7 +7,12 @@ for (pack in packages) {
   library(pack, character.only = TRUE)
 }
 
+rm(pack, packages)
+
 # loading stock pricing data
-getSymbols(Symbols = 'SPY')
-?getSymbols
-SPY
+SPY <- data.frame(getSymbols(Symbols = 'SPY', auto.assign = FALSE)) %>%
+  `colnames<-`(c('Open', 'High', 'Low', 'Close', 'Volume', 'Adjusted_Close'))
+
+
+SPY[order(desc(as_datetime(rownames(SPY)))), ] %>%
+  top_n(10)
