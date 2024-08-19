@@ -13,6 +13,7 @@ rm(pack, packages)
 SPY <- data.frame(getSymbols(Symbols = 'SPY', auto.assign = FALSE)) %>%
   `colnames<-`(c('Open', 'High', 'Low', 'Close', 'Volume', 'Adjusted_Close'))
 
+chart_Series(SPY)
 
 SPY[order(desc(as_datetime(rownames(SPY)))), ] %>%
   top_n(10)
