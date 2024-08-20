@@ -28,6 +28,14 @@ stock <- stock %>%
 
 # Filter out predictor columns
 # This also converts a timeseries data to individually unrelated data
-predictor_list <- c('change_pct', 'Volume')
-x <- stock %>%
-  select(any_of(predictor_list))
+metrics <- c('change_pct', 'Volume', 'y')
+metrics <- stock %>%
+  select(any_of(metrics))
+
+# split into train and test datasets
+test_ind <- createDataPartition(metrics$y, times = 1, p = 0.1, list = FALSE)
+test <- metrics[test_ind, ]
+train <- metrics[-test_ind, ]
+
+# setup training control
+control <- trainControl(method = 'cv', number = 10, p = 0.9)
