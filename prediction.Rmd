@@ -15,11 +15,13 @@ This project is about predicting stock price moving direction based on historica
 
 ## Step 1: Transform data and create predictors
 
-Pricing data for SPY will be used as an example for this project, with date range from 2007 to 2024.
+Pricing data for SPY will be used as an example for this project, with date range from 2007 to 2024. Below plot showing price changes of the stock, with the upper boundary indicating original price, while lower boundary indicating adjusted price, taking into account of dividends. Since this project will be predicting price movement, the original (unadjusted) price data will be used.
 
 ```{r prediction}
-plot(stock$rownames, stock$Close)
+chart_Series(stock_raw)
 ```
+
+Since this is a timeseries data
 
 ## Including Plots
 

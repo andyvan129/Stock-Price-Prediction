@@ -1,7 +1,7 @@
 # building a stock price prediction model using historic SPY data
 
 # install required packages
-packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2')
+packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo')
 for (pack in packages) {
   if (!require(pack, character.only = TRUE)) install.packages(pack)
   library(pack, character.only = TRUE)
@@ -10,19 +10,22 @@ for (pack in packages) {
 rm(pack, packages)
 
 # loading stock pricing data
-stock <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
+stock_raw <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
   `colnames<-`(c('Open', 'High', 'Low', 'Close', 'Volume', 'Adjusted_Close'))
 
-# visualize price changes
-chart_Series(stock)
-
 # Compute price changes and create prediction target (y)
-stock <- stock %>%
+stock <- stock_raw %>%
   data.frame() %>%
   mutate(change = Close - Open, change_pct = change * 100 / Open) %>%
   mutate(direction = ifelse(change_pct > 0, 1, 0), y = lead(direction)) %>%
   na.omit() %>%
   mutate(direction = NULL) # remove the known "direction" column.
+
+# Compute volume changes compared to average volume of the previous n days
+stock <- stock %>%
+  mutate(avg_vol_10 = rollmean(stock$Volume, 10, fill = NA, align = 'right')) %>%
+  na.omit() %>%
+  mutate(vol_10 = (Volume - avg_vol_10) / Volume)
 
 # Additional predictors can be added at this step
 
