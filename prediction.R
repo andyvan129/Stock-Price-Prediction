@@ -18,7 +18,9 @@ stock <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
 # Compute price changes and create prediction target (y)
 stock <- stock %>%
   data.frame() %>%
-  mutate(change = Close - Open, change_pct = change * 100 / Open) %>%
+  mutate(change = Close - Open, change_pct = change * 100 / Open,
+         high_pct = (High - Open) * 100 / Open,
+         low_pct = (Low - Open) * 100 / Open) %>%
   mutate(direction = ifelse(change_pct > 0, 1, 0), y = lead(direction),
          y = factor(y)) %>%
   na.omit() %>%
@@ -26,6 +28,12 @@ stock <- stock %>%
 
 
 # Compute volume changes compared to average volume of the previous n days
+avg_vol_n <- c(10, 25, 50, 100, 200)
+lapply(avg_vol_n, function(x){
+  col_name <- paste('vol', x, sep = '_')
+  stock %>%
+    mutate(col_name = rollmean(Volume, x, fill = NA, align = 'right'))
+})
 stock <- stock %>%
   mutate(avg_vol_10 = rollmean(stock$Volume, 10, fill = NA, align = 'right')) %>%
   na.omit() %>%
