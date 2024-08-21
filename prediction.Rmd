@@ -17,11 +17,21 @@ This project is about predicting stock price moving direction based on historica
 
 Pricing data for SPY will be used as an example for this project, with date range from 2007 to 2024. Below plot showing price changes of the stock, with the upper boundary indicating original price, while lower boundary indicating adjusted price, taking into account of dividends. Since this project will be predicting price movement, the original (unadjusted) price data will be used.
 
-```{r prediction}
-chart_Series(stock_raw)
+```{r, echo=FALSE}
+plot(stock$Close, type = 'l')
 ```
 
-Since this is a timeseries data
+Currently this is a timeseries data, but in this analysis we will want to convert it so that each data point is unrelated to time. To do this, the price changes and volume changes have been converted to percentages related to the previous day or average of the past few days.
+
+Here is a plot to see if there is any relationship between price change and trading volume:
+
+```{r, echo=FALSE}
+stock %>%
+  ggplot(aes(x = change_pct, y = avg_vol_10, col = y)) +
+  geom_point()
+```
+
+Clearly, not much relationship at all....
 
 ## Including Plots
 

@@ -10,11 +10,11 @@ for (pack in packages) {
 rm(pack, packages)
 
 # loading stock pricing data
-stock_raw <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
+stock <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
   `colnames<-`(c('Open', 'High', 'Low', 'Close', 'Volume', 'Adjusted_Close'))
 
 # Compute price changes and create prediction target (y)
-stock <- stock_raw %>%
+stock <- stock %>%
   data.frame() %>%
   mutate(change = Close - Open, change_pct = change * 100 / Open) %>%
   mutate(direction = ifelse(change_pct > 0, 1, 0), y = lead(direction)) %>%
