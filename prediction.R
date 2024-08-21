@@ -39,23 +39,40 @@ stock <- stock %>%
 
 
 # Compute rolling price averages and recent high/lows
+moving_avg_n <- seq(10, 50, 10)
+moving_avg <- list()
+for (n in moving_avg_n){
+  col_name <- paste('sma', n, sep = '_')
+  moving_avg[[col_name]] <- (stock$Close - SMA(stock$Close, n = n)) * 100 / stock$Close
+  col_name <- paste('ema', n, sep = '_')
+  moving_avg[[col_name]] <- (stock$Close - EMA(stock$Close, n = n)) * 100 / stock$Close
+  col_name <- paste('evwma', n, sep = '_')
+  moving_avg[[col_name]] <- (stock$Close - EVWMA(stock$Close, stock$Volume, n = n)) * 100 / stock$Close
+}
+stock <- stock %>%
+  cbind(moving_avg)
 
 
 
 # Plot a chart checking if there is any correlation
 stock %>%
-  ggplot(aes(x = change_pct, y = vol_50, col = y)) +
+  ggplot(aes(x = change_pct, y = ema_50, col = y)) +
   geom_point() +
   scale_y_sqrt() +
   scale_x_sqrt()
 # clearly not....
+
+unlist(lapply(moving_avg_n, function(x) paste('ema', x, sep = '_')))
 
 
 # Additional predictors can be added at this step
 
 # Filter out predictor columns
 # This also converts a timeseries data to individually unrelated data
-metrics <- c('change_pct', 'high_pct', 'low_pct', 'vol_10', 'vol_50', 'y')
+metrics <- c('change_pct', 'high_pct', 'low_pct', 
+             unlist(lapply(moving_avg_n, function(x) paste('ema', x, sep = '_'))),
+             'vol_10', 'vol_50', 
+             'y')
 metrics <- stock %>%
   select(any_of(metrics)) %>%
   na.omit()
@@ -72,6 +89,10 @@ train_train <- train[-train_test_ind, ]
 # setup training control
 control <- trainControl(method = 'cv', number = 10, p = 0.9)
 
+
+# train individual models to test accuracy
+train(y ~ ., data = train_train, trControl = control, method = 'rf')
+
 # train some models
 models <- c('knn', 'rf')
 fit <- list()
@@ -83,6 +104,9 @@ for (model in models){
 # test and select models
 pred <- list()
 for (f in fit){
-  pred[[f$method]] <- predict(f, test)
+  pred[[f$method]] <- predict(f, train_test)
 }
 data.frame(pred)
+
+
+# generate final result using test set
