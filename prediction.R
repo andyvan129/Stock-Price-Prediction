@@ -1,14 +1,19 @@
 # building a stock price prediction model using historic SPY data
 
 # install required packages
-packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'randomForest')
+packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'randomForest', 'roll', 'parallel', 'doParallel')
 for (pack in packages) {
   if (!require(pack, character.only = TRUE)) install.packages(pack)
   library(pack, character.only = TRUE)
 }
 
-rm(pack, packages)
+# setup parallel computation
+num_core <- detectCores() - 1
+pl <- makeCluster(num_core)
+registerDoParallel(pl)
+#on.exit(stopCluster(pl))
 
+rm(pack, packages, num_core)
 
 # loading stock pricing data
 stock_raw <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
@@ -26,23 +31,12 @@ stock <- stock_raw %>%
   mutate(direction = NULL) # remove the known "direction" column.
 
 
-# Compute volume changes compared to average volume of the previous n days
-avg_vol_n <- c(10, 50)
-avg_vol <- list()
-for (n in avg_vol_n){
-  col_name <- paste('vol', n, sep = '_')
-  avg_vol[[col_name]] <- rollmean(stock$Volume, n, fill = NA, align = 'right')
-  avg_vol[[col_name]] <- (stock$Volume - avg_vol[[col_name]]) / stock$Volume
-}
-stock <- stock %>%
-  cbind(avg_vol)
-rm(avg_vol, avg_vol_n)
-
-
 # Compute rolling price averages and recent high/lows
-moving_avg_n <- c(10, 50, 100)
+moving_avg_n <- c(10)
 moving_avg <- list()
 for (n in moving_avg_n){
+  
+  # Rolling average price changes
   col_name <- paste('sma', n, sep = '_')
   moving_avg[[col_name]] <- (stock$Close - SMA(stock$Close, n = n)) * 100 / stock$Close
   col_name <- paste('ema', n, sep = '_')
@@ -50,10 +44,19 @@ for (n in moving_avg_n){
   col_name <- paste('evwma', n, sep = '_')
   moving_avg[[col_name]] <- (stock$Close - EVWMA(stock$Close, stock$Volume, n = n)) * 100 / stock$Close
   
+  # Rolling min/max
   col_name <- paste('high', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Close - rollmax(stock$High, n, fill = NA, align = 'right')) * 100 / stock$Close
+  moving_avg[[col_name]] <- (stock$Close - rollmax(stock$High, n, fill = NA, align = 'right')) / stock$Close
   col_name <- paste('low', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Close - -rollmax(-stock$Low, n, fill = NA, align = 'right')) * 100 / stock$Close
+  moving_avg[[col_name]] <- (stock$Close - -rollmax(-stock$Low, n, fill = NA, align = 'right')) / stock$Close
+  
+  # Rolling volume
+  col_name <- paste('vol', n, sep = '_')
+  moving_avg[[col_name]] <- (stock$Volume - rollmean(stock$Volume, n, fill = NA, align = 'right')) / stock$Volume
+  
+  # Rolling standard deviation (volatility)
+  col_name <- paste('sd', n, sep = '_')
+  moving_avg[[col_name]] <- roll_sd(stock$change_pct, n)
 }
 stock <- stock %>%
   cbind(moving_avg)
@@ -61,11 +64,9 @@ rm(moving_avg, moving_avg_n, col_name, n)
 
 
 # Plot a chart checking if there is any correlation
-stock %>%
-  ggplot(aes(x = change_pct, y = ema_50, col = y)) +
-  geom_point() +
-  scale_y_sqrt() +
-  scale_x_sqrt()
+#stock %>%
+#  ggplot(aes(x = change_pct, y = sd_10, col = y)) +
+#  geom_point()
 # clearly not....
 
 
@@ -76,7 +77,7 @@ stock %>%
 # Filter out predictor columns
 # This also converts a timeseries data to individually unrelated data
 metrics <- stock %>%
-  select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close', 'change')) %>%
+  select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close')) %>%
   na.omit()
 
 
@@ -96,11 +97,11 @@ control <- trainControl(method = 'cv', number = 10, p = 0.9)
 
 
 # train individual models to test accuracy
-train(y ~ ., data = train_train, trControl = control, method = 'xgbTree')
+# train(y ~ ., data = train_train, trControl = control, method = 'xgbTree')
 
 
 # train some models
-models <- c('knn', 'rf')
+models <- c('knn', 'rf', 'glm', 'xgbTree')
 fit <- list()
 for (model in models){
   fit[[model]] <- train(y ~ ., data = train_train, trControl = control, method = model)
@@ -112,7 +113,22 @@ pred <- list()
 for (f in fit){
   pred[[f$method]] <- predict(f, train_test)
 }
-data.frame(pred)
+ensemble <- pred %>%
+  data.frame() %>%
+  mutate(count = rowSums(. == 1)) %>%
+  mutate(y_hat = ifelse(count >= 2, 1, 0),
+         y_hat = factor(y_hat))
 
+
+confusionMatrix(ensemble$y_hat, train_test$y)
+
+train_test %>%
+  mutate(y_hat = ensemble$y_hat,
+         y_hat = as.numeric(y_hat)) %>%
+  summarise(sum(change * y_hat), sum(change))
 
 # generate final result using test set
+
+
+
+
