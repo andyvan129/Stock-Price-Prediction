@@ -103,6 +103,7 @@ control <- trainControl(method = 'cv', number = 10, p = 0.9)
 # train some models
 models <- c('knn', 'rf', 'glm', 'xgbTree')
 fit <- list()
+fit[[knn]] <- train(y ~ ., data = train_train, trControl = control, method = 'knn')
 for (model in models){
   fit[[model]] <- train(y ~ ., data = train_train, trControl = control, method = model)
 }
