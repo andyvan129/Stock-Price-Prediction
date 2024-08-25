@@ -1,7 +1,7 @@
-# building a stock price prediction model using historic SPY data
+# *ATTEMPTING* to build a stock price prediction model using historic SPY data
 
 # install required packages
-packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'randomForest', 'roll', 'parallel', 'doParallel')
+packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'randomForest', 'roll', 'parallel', 'doParallel', 'foreach')
 for (pack in packages) {
   if (!require(pack, character.only = TRUE)) install.packages(pack)
   library(pack, character.only = TRUE)
@@ -31,7 +31,7 @@ stock <- stock_raw %>%
 
 
 # Compute rolling price averages and recent high/lows
-moving_avg_n <- c(10)
+moving_avg_n <- c(10, 20, 40, 80)
 moving_avg <- list()
 for (n in moving_avg_n){
   
@@ -73,16 +73,9 @@ metrics <- stock %>%
 
 
 # split into train and test datasets
-test_ind <- createDataPartition(metrics$y, times = 1, p = 0.1, list = FALSE)
+test_ind <- createDataPartition(metrics$y, times = 1, p = 0.5, list = FALSE)
 final_test <- metrics[test_ind, ]
 train <- metrics[-test_ind, ]
-
-# carve a portion out of training set for model tuning and ensemble purpose
-train_test_ind <- createDataPartition(train$y, times = 1, p = 0.1, list = FALSE)
-train_test <- train[train_test_ind, ]
-train_train <- train[-train_test_ind, ]
-
-rm(test_ind, train_test_ind, train)
 
 
 # setup training control
@@ -90,15 +83,15 @@ control <- trainControl(method = 'cv', number = 10, p = 0.9)
 
 # train some models
 fit <- list()
-fit[['knn']] <- train(y ~ ., data = train_train, trControl = control, method = 'knn', tuneGrid = data.frame(k = seq(1, 15, 2)))
-fit[['rf']] <- train(y ~ ., data = train_train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, 12, 1)))
-fit[['glm']] <- train(y ~ ., data = train_train, trControl = control, method = 'glm')
-fit[['xgbTree']] <- train(y ~ ., data = train_train, trControl = control, method = 'xgbTree')
-fit[['rpart']] <- train(y ~ ., data = train_train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.03, 0.005)))
+fit[['knn']] <- train(y ~ ., data = train, trControl = control, method = 'knn', tuneGrid = data.frame(k = seq(1, 15, 2)))
+fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 1)))
+fit[['glm']] <- train(y ~ ., data = train, trControl = control, method = 'glm')
+fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
+fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.03, 0.005)))
 
 
-# test and select models
-ensemble_models <- 3
+# ensemble models and final testing
+ensemble_models <- 4
 test_data <- final_test
 
 pred <- list()
@@ -111,10 +104,11 @@ ensemble <- pred %>%
   mutate(y_hat = ifelse(count >= ensemble_models, 1, 0),
          y_hat = factor(y_hat))
 
+confusionMatrix(ensemble$y_hat, test_data$y, positive = '1')
 
-confusionMatrix(ensemble$y_hat, test_data$y)
 
+# testing monetory returns using trained models
 test_data %>%
   mutate(y_hat = ensemble$y_hat,
-         y_hat = as.numeric(y_hat)) %>%
-  summarise(sum(change * y_hat), sum(change))
+         y_hat = as.numeric(as.character(y_hat))) %>%
+  summarise(predicted_portfolio = sum(change * y_hat), buy_and_hold = sum(change))
