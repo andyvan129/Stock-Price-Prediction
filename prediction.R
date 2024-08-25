@@ -11,7 +11,6 @@ for (pack in packages) {
 num_core <- detectCores() - 1
 pl <- makeCluster(num_core)
 registerDoParallel(pl)
-#on.exit(stopCluster(pl))
 
 rm(pack, packages, num_core)
 
@@ -63,16 +62,8 @@ stock <- stock %>%
 rm(moving_avg, moving_avg_n, col_name, n)
 
 
-# Plot a chart checking if there is any correlation
-#stock %>%
-#  ggplot(aes(x = change_pct, y = sd_10, col = y)) +
-#  geom_point()
-# clearly not....
-
-
-
-
 # Additional predictors can be added at this step
+
 
 # Filter out predictor columns
 # This also converts a timeseries data to individually unrelated data
@@ -86,50 +77,44 @@ test_ind <- createDataPartition(metrics$y, times = 1, p = 0.1, list = FALSE)
 final_test <- metrics[test_ind, ]
 train <- metrics[-test_ind, ]
 
+# carve a portion out of training set for model tuning and ensemble purpose
 train_test_ind <- createDataPartition(train$y, times = 1, p = 0.1, list = FALSE)
 train_test <- train[train_test_ind, ]
 train_train <- train[-train_test_ind, ]
 
 rm(test_ind, train_test_ind, train)
 
+
 # setup training control
 control <- trainControl(method = 'cv', number = 10, p = 0.9)
 
-
-# train individual models to test accuracy
-# train(y ~ ., data = train_train, trControl = control, method = 'xgbTree')
-
-
 # train some models
-models <- c('knn', 'rf', 'glm', 'xgbTree')
 fit <- list()
-fit[[knn]] <- train(y ~ ., data = train_train, trControl = control, method = 'knn')
-for (model in models){
-  fit[[model]] <- train(y ~ ., data = train_train, trControl = control, method = model)
-}
+fit[['knn']] <- train(y ~ ., data = train_train, trControl = control, method = 'knn', tuneGrid = data.frame(k = seq(1, 15, 2)))
+fit[['rf']] <- train(y ~ ., data = train_train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, 12, 1)))
+fit[['glm']] <- train(y ~ ., data = train_train, trControl = control, method = 'glm')
+fit[['xgbTree']] <- train(y ~ ., data = train_train, trControl = control, method = 'xgbTree')
+fit[['rpart']] <- train(y ~ ., data = train_train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.03, 0.005)))
 
 
 # test and select models
+ensemble_models <- 3
+test_data <- final_test
+
 pred <- list()
 for (f in fit){
-  pred[[f$method]] <- predict(f, train_test)
+  pred[[f$method]] <- predict(f, test_data)
 }
 ensemble <- pred %>%
   data.frame() %>%
   mutate(count = rowSums(. == 1)) %>%
-  mutate(y_hat = ifelse(count >= 2, 1, 0),
+  mutate(y_hat = ifelse(count >= ensemble_models, 1, 0),
          y_hat = factor(y_hat))
 
 
-confusionMatrix(ensemble$y_hat, train_test$y)
+confusionMatrix(ensemble$y_hat, test_data$y)
 
-train_test %>%
+test_data %>%
   mutate(y_hat = ensemble$y_hat,
          y_hat = as.numeric(y_hat)) %>%
   summarise(sum(change * y_hat), sum(change))
-
-# generate final result using test set
-
-
-
-
