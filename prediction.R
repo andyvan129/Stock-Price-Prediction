@@ -73,13 +73,14 @@ metrics <- stock %>%
 
 
 # split into train and test datasets
-test_ind <- createDataPartition(metrics$y, times = 1, p = 0.5, list = FALSE)
-final_test <- metrics[test_ind, ]
-train <- metrics[-test_ind, ]
+#test_ind <- createDataPartition(metrics$y, times = 1, p = 0.5, list = FALSE)
+final_test <- metrics[3001:nrow(metrics), ]
+train <- metrics[1:3000, ]
 
 
 # setup training control
-control <- trainControl(method = 'cv', number = 10, p = 0.9)
+#control <- trainControl(method = 'cv', number = 10, p = 0.9)
+control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 50, fixedWindow = TRUE)
 
 # train some models
 fit <- list()
