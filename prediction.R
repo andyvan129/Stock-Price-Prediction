@@ -1,7 +1,7 @@
 # *ATTEMPTING* to build a stock price prediction model using historic SPY data
 
 # install required packages
-packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'randomForest', 'roll', 'parallel', 'doParallel', 'foreach')
+packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'roll', 'parallel', 'doParallel')
 for (pack in packages) {
   if (!require(pack, character.only = TRUE)) install.packages(pack)
   library(pack, character.only = TRUE)
@@ -36,90 +36,57 @@ final_test <- stock[3001:nrow(stock), ]
 
 
 # Compute rolling price averages and recent high/lows
-data <- train
 moving_avg_n <- c(10, 20, 40, 80)
-moving_avg <- list()
-for (n in moving_avg_n){
-  
-  # Rolling average price changes
-  col_name <- paste('sma', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - SMA(data$Close, n = n)) * 100 / data$Close
-  col_name <- paste('ema', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - EMA(data$Close, n = n)) * 100 / data$Close
-  col_name <- paste('evwma', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - EVWMA(data$Close, data$Volume, n = n)) * 100 / data$Close
-  
-  # Rolling min/max
-  col_name <- paste('high', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - rollmax(data$High, n, fill = NA, align = 'right')) / data$Close
-  col_name <- paste('low', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - -rollmax(-data$Low, n, fill = NA, align = 'right')) / data$Close
-  
-  # Rolling volume
-  col_name <- paste('vol', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Volume - rollmean(data$Volume, n, fill = NA, align = 'right')) / data$Volume
-  
-  # Rolling standard deviation (volatility)
-  col_name <- paste('sd', n, sep = '_')
-  moving_avg[[col_name]] <- roll_sd(data$change_pct, n)
-}
-train <- train %>%
-  cbind(moving_avg)
-rm(moving_avg, moving_avg_n, col_name, n)
 
-
-# compute same data for test set
-data <- final_test
-moving_avg_n <- c(10, 20, 40, 80)
-moving_avg <- list()
-for (n in moving_avg_n){
-  
-  # Rolling average price changes
-  col_name <- paste('sma', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - SMA(data$Close, n = n)) * 100 / data$Close
-  col_name <- paste('ema', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - EMA(data$Close, n = n)) * 100 / data$Close
-  col_name <- paste('evwma', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - EVWMA(data$Close, data$Volume, n = n)) * 100 / data$Close
-  
-  # Rolling min/max
-  col_name <- paste('high', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - rollmax(data$High, n, fill = NA, align = 'right')) / data$Close
-  col_name <- paste('low', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Close - -rollmax(-data$Low, n, fill = NA, align = 'right')) / data$Close
-  
-  # Rolling volume
-  col_name <- paste('vol', n, sep = '_')
-  moving_avg[[col_name]] <- (data$Volume - rollmean(data$Volume, n, fill = NA, align = 'right')) / data$Volume
-  
-  # Rolling standard deviation (volatility)
-  col_name <- paste('sd', n, sep = '_')
-  moving_avg[[col_name]] <- roll_sd(data$change_pct, n)
+rolling <- function(x){
+  data <- x
+  moving_avg <- list()
+  for (n in moving_avg_n){
+    # Rolling average price changes
+    col_name <- paste('sma', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - SMA(data$Close, n = n)) * 100 / data$Close
+    col_name <- paste('ema', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - EMA(data$Close, n = n)) * 100 / data$Close
+    col_name <- paste('evwma', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - EVWMA(data$Close, data$Volume, n = n)) * 100 / data$Close
+    
+    # Rolling min/max
+    col_name <- paste('high', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - rollmax(data$High, n, fill = NA, align = 'right')) / data$Close
+    col_name <- paste('low', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - -rollmax(-data$Low, n, fill = NA, align = 'right')) / data$Close
+    
+    # Rolling volume
+    col_name <- paste('vol', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Volume - rollmean(data$Volume, n, fill = NA, align = 'right')) / data$Volume
+    
+    # Rolling standard deviation (volatility)
+    col_name <- paste('sd', n, sep = '_')
+    moving_avg[[col_name]] <- roll_sd(data$change_pct, n)
+  }
+  x <- x %>%
+    cbind(moving_avg)
+  return(x)
 }
-final_test <- final_test %>%
-  cbind(moving_avg)
-rm(moving_avg, moving_avg_n, col_name, n)
+
+train <- rolling(train)
+final_test <- rolling(final_test)
+
 
 
 # Filter out predictor columns
-# This also converts a timeseries data to individually unrelated data
-train <- train %>%
-  select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close')) %>%
-  na.omit()
+filt_columns <- function(x){
+  x <- x %>%
+    select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close')) %>%
+    na.omit()
+  return(x)
+}
 
-final_test <- final_test %>%
-  select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close')) %>%
-  na.omit()
-
-
-# split into train and test datasets
-#test_ind <- createDataPartition(metrics$y, times = 1, p = 0.5, list = FALSE)
-#final_test <- metrics[3001:nrow(metrics), ]
-#train <- metrics[1:3000, ]
+train <- filt_columns(train)
+final_test <- filt_columns(final_test)
 
 
 # setup training control
-#control <- trainControl(method = 'cv', number = 10, p = 0.9)
 control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 300, fixedWindow = FALSE, skip = 49)
 
 # train some models
