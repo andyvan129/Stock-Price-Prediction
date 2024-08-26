@@ -80,19 +80,19 @@ train <- metrics[1:3000, ]
 
 # setup training control
 #control <- trainControl(method = 'cv', number = 10, p = 0.9)
-control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 50, fixedWindow = TRUE)
+control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 300, fixedWindow = FALSE, skip = 49)
 
 # train some models
 fit <- list()
 fit[['knn']] <- train(y ~ ., data = train, trControl = control, method = 'knn', tuneGrid = data.frame(k = seq(1, 15, 2)))
-fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 1)))
+fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 2)))
 fit[['glm']] <- train(y ~ ., data = train, trControl = control, method = 'glm')
 fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
-fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.03, 0.005)))
-
+fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.05, 0.005)))
+fit[['earth']] <- train(y ~ ., data = train, trControl = control, method = 'earth')
 
 # ensemble models and final testing
-ensemble_models <- 4
+ensemble_models <- 5
 test_data <- final_test
 
 pred <- list()
