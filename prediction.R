@@ -30,52 +30,92 @@ stock <- stock_raw %>%
   mutate(direction = NULL) # remove the known "direction" column.
 
 
+# split data before creating predictors (to avoid data leakage)
+train <- stock[1:3000, ]
+final_test <- stock[3001:nrow(stock), ]
+
+
 # Compute rolling price averages and recent high/lows
+data <- train
 moving_avg_n <- c(10, 20, 40, 80)
 moving_avg <- list()
 for (n in moving_avg_n){
   
   # Rolling average price changes
   col_name <- paste('sma', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Close - SMA(stock$Close, n = n)) * 100 / stock$Close
+  moving_avg[[col_name]] <- (data$Close - SMA(data$Close, n = n)) * 100 / data$Close
   col_name <- paste('ema', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Close - EMA(stock$Close, n = n)) * 100 / stock$Close
+  moving_avg[[col_name]] <- (data$Close - EMA(data$Close, n = n)) * 100 / data$Close
   col_name <- paste('evwma', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Close - EVWMA(stock$Close, stock$Volume, n = n)) * 100 / stock$Close
+  moving_avg[[col_name]] <- (data$Close - EVWMA(data$Close, data$Volume, n = n)) * 100 / data$Close
   
   # Rolling min/max
   col_name <- paste('high', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Close - rollmax(stock$High, n, fill = NA, align = 'right')) / stock$Close
+  moving_avg[[col_name]] <- (data$Close - rollmax(data$High, n, fill = NA, align = 'right')) / data$Close
   col_name <- paste('low', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Close - -rollmax(-stock$Low, n, fill = NA, align = 'right')) / stock$Close
+  moving_avg[[col_name]] <- (data$Close - -rollmax(-data$Low, n, fill = NA, align = 'right')) / data$Close
   
   # Rolling volume
   col_name <- paste('vol', n, sep = '_')
-  moving_avg[[col_name]] <- (stock$Volume - rollmean(stock$Volume, n, fill = NA, align = 'right')) / stock$Volume
+  moving_avg[[col_name]] <- (data$Volume - rollmean(data$Volume, n, fill = NA, align = 'right')) / data$Volume
   
   # Rolling standard deviation (volatility)
   col_name <- paste('sd', n, sep = '_')
-  moving_avg[[col_name]] <- roll_sd(stock$change_pct, n)
+  moving_avg[[col_name]] <- roll_sd(data$change_pct, n)
 }
-stock <- stock %>%
+train <- train %>%
   cbind(moving_avg)
 rm(moving_avg, moving_avg_n, col_name, n)
 
 
-# Additional predictors can be added at this step
+# compute same data for test set
+data <- final_test
+moving_avg_n <- c(10, 20, 40, 80)
+moving_avg <- list()
+for (n in moving_avg_n){
+  
+  # Rolling average price changes
+  col_name <- paste('sma', n, sep = '_')
+  moving_avg[[col_name]] <- (data$Close - SMA(data$Close, n = n)) * 100 / data$Close
+  col_name <- paste('ema', n, sep = '_')
+  moving_avg[[col_name]] <- (data$Close - EMA(data$Close, n = n)) * 100 / data$Close
+  col_name <- paste('evwma', n, sep = '_')
+  moving_avg[[col_name]] <- (data$Close - EVWMA(data$Close, data$Volume, n = n)) * 100 / data$Close
+  
+  # Rolling min/max
+  col_name <- paste('high', n, sep = '_')
+  moving_avg[[col_name]] <- (data$Close - rollmax(data$High, n, fill = NA, align = 'right')) / data$Close
+  col_name <- paste('low', n, sep = '_')
+  moving_avg[[col_name]] <- (data$Close - -rollmax(-data$Low, n, fill = NA, align = 'right')) / data$Close
+  
+  # Rolling volume
+  col_name <- paste('vol', n, sep = '_')
+  moving_avg[[col_name]] <- (data$Volume - rollmean(data$Volume, n, fill = NA, align = 'right')) / data$Volume
+  
+  # Rolling standard deviation (volatility)
+  col_name <- paste('sd', n, sep = '_')
+  moving_avg[[col_name]] <- roll_sd(data$change_pct, n)
+}
+final_test <- final_test %>%
+  cbind(moving_avg)
+rm(moving_avg, moving_avg_n, col_name, n)
 
 
 # Filter out predictor columns
 # This also converts a timeseries data to individually unrelated data
-metrics <- stock %>%
+train <- train %>%
+  select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close')) %>%
+  na.omit()
+
+final_test <- final_test %>%
   select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close')) %>%
   na.omit()
 
 
 # split into train and test datasets
 #test_ind <- createDataPartition(metrics$y, times = 1, p = 0.5, list = FALSE)
-final_test <- metrics[3001:nrow(metrics), ]
-train <- metrics[1:3000, ]
+#final_test <- metrics[3001:nrow(metrics), ]
+#train <- metrics[1:3000, ]
 
 
 # setup training control
@@ -99,17 +139,24 @@ pred <- list()
 for (f in fit){
   pred[[f$method]] <- predict(f, test_data)
 }
-ensemble <- pred %>%
-  data.frame() %>%
-  mutate(count = rowSums(. == 1)) %>%
-  mutate(y_hat = ifelse(count >= ensemble_models, 1, 0),
-         y_hat = factor(y_hat))
-
-confusionMatrix(ensemble$y_hat, test_data$y, positive = '1')
 
 
-# testing monetory returns using trained models
-test_data %>%
-  mutate(y_hat = ensemble$y_hat,
-         y_hat = as.numeric(as.character(y_hat))) %>%
-  summarise(predicted_portfolio = sum(change * y_hat), buy_and_hold = sum(change))
+result <- function(x){
+  ensemble <- pred %>%
+    data.frame() %>%
+    mutate(count = rowSums(. == 1)) %>%
+    mutate(y_hat = ifelse(count >= x, 1, 0),
+           y_hat = factor(y_hat, levels = levels(test_data$y)))
+  
+  confusionMatrix(ensemble$y_hat, test_data$y, positive = '1')
+  
+  
+  # testing dollar returns using trained models
+  test_data %>%
+    mutate(y_hat = ensemble$y_hat,
+           y_hat = as.numeric(as.character(y_hat))) %>%
+    summarise(predicted_portfolio = sum(change * y_hat), buy_and_hold = sum(change))
+}
+
+ensemble_n <- seq(1, length(pred), 1)
+lapply(ensemble_n, result)
