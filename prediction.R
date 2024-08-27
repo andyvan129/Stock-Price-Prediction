@@ -33,7 +33,7 @@ stock <- stock_raw %>%
   mutate(direction = NULL) # remove the known "direction" column.
 
 
-# split data before creating predictors (to avoid data leakage)
+# split data before creating predictors
 train <- stock[1:3000, ]
 ensemble_test <- stock[3001:4000, ]
 final_test <- stock[4001:nrow(stock), ]

@@ -1,5 +1,5 @@
 ---
-title: "prediction"
+title: "Stock Price Prediction"
 author: "Andy Fan"
 date: "`r Sys.Date()`"
 output: pdf_document
@@ -13,6 +13,36 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This project is about predicting stock price moving direction based on historical stock data. Historic data will be gathered from Yahoo Finance.
 
+```{r include=FALSE}
+# install required packages
+packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'roll', 'parallel', 'doParallel')
+for (pack in packages) {
+  if (!require(pack, character.only = TRUE)) install.packages(pack)
+  library(pack, character.only = TRUE)
+}
+
+# setup parallel computation for multi-core computers
+if (detectCores() > 1){
+  num_core <- detectCores() - 1
+  pl <- makeCluster(num_core)
+  registerDoParallel(pl)
+}
+
+# loading stock pricing data
+stock_raw <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
+  `colnames<-`(c('Open', 'High', 'Low', 'Close', 'Volume', 'Adjusted_Close'))
+
+# Compute price changes and create prediction target (y)
+stock <- stock_raw %>%
+  data.frame() %>%
+  mutate(change = Close - Open, change_pct = change * 100 / Open,
+         high_pct = (High - Open) * 100 / Open,
+         low_pct = (Low - Open) * 100 / Open) %>%
+  mutate(direction = ifelse(change_pct > 0, 1, 0), y = lead(direction),
+         y = factor(y)) %>%
+  mutate(direction = NULL) # remove the known "direction" column.
+```
+
 ## Step 1: Transform data and create predictors
 
 Pricing data for SPY will be used as an example for this project, with date range from 2007 to 2024. Below plot showing price changes of the stock, with the upper boundary indicating original price, while lower boundary indicating adjusted price, taking into account of dividends. Since this project will be predicting price movement, the original (unadjusted) price data will be used.
@@ -24,12 +54,6 @@ plot(stock$Close, type = 'l')
 Currently this is a timeseries data, but in this analysis we will want to convert it so that each data point is unrelated to time. To do this, the price changes and volume changes have been converted to percentages related to the previous day or average of the past few days.
 
 Here is a plot to see if there is any relationship between price change and trading volume:
-
-```{r, echo=FALSE}
-stock %>%
-  ggplot(aes(x = change_pct, y = avg_vol_10, col = y)) +
-  geom_point()
-```
 
 Clearly, not much relationship at all....
 
