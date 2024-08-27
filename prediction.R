@@ -1,7 +1,7 @@
 # *ATTEMPTING* to build a stock price prediction model using historic SPY data
 
 # install required packages
-packages <- c('dplyr', 'caret', 'tidyquant', 'ggplot2', 'zoo', 'roll', 'parallel', 'doParallel')
+packages <- c('dplyr', 'caret', 'tidyquant', 'zoo', 'roll', 'parallel', 'doParallel')
 for (pack in packages) {
   if (!require(pack, character.only = TRUE)) install.packages(pack)
   library(pack, character.only = TRUE)
@@ -98,15 +98,14 @@ control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 300
 # train some models
 fit <- list()
 fit[['knn']] <- train(y ~ ., data = train, trControl = control, method = 'knn', tuneGrid = data.frame(k = seq(1, 15, 2)))
-fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 2)))
+# fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 2)))
 fit[['glm']] <- train(y ~ ., data = train, trControl = control, method = 'glm')
-fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
+# fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
 fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.05, 0.005)))
 fit[['earth']] <- train(y ~ ., data = train, trControl = control, method = 'earth')
 
-# ensemble models and final testing
-test_data <- ensemble_test
 
+# ensemble models and final testing
 result <- function(x, test_data){
   pred <- list()
   for (f in fit){
@@ -133,9 +132,8 @@ result <- function(x, test_data){
 }
 
 ensemble_n <- seq(1, length(fit), 1)
-lapply(ensemble_n, result)
+lapply(ensemble_n, function(x) result(x, ensemble_test))
 # choosing number of models based on highest precision
 
 # Final testing
-test_data <- final_test
-result(6)
+result(4, final_test)
