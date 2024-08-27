@@ -12,6 +12,8 @@ if (detectCores() > 1){
   num_core <- detectCores() - 1
   pl <- makeCluster(num_core)
   registerDoParallel(pl)
+} else {
+  registerDoSEQ()
 }
 
 
@@ -105,7 +107,7 @@ fit[['earth']] <- train(y ~ ., data = train, trControl = control, method = 'eart
 # ensemble models and final testing
 test_data <- ensemble_test
 
-result <- function(x){
+result <- function(x, test_data){
   pred <- list()
   for (f in fit){
     pred[[f$method]] <- predict(f, test_data)

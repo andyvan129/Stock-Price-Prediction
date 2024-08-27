@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Introduction
 
-This project is about predicting stock price moving direction based on historical stock data. Historic data will be gathered from Yahoo Finance.
+This project will be attempting to predict stock price moving direction based on historical stock data. Historic data will be gathered from Yahoo Finance. Stock pricing data is extemly noisy and not an easy task to predict, therefore this project will just focus on general methods instead of results.
 
 ```{r include=FALSE}
 # install required packages
@@ -20,18 +20,29 @@ for (pack in packages) {
   if (!require(pack, character.only = TRUE)) install.packages(pack)
   library(pack, character.only = TRUE)
 }
+```
 
-# setup parallel computation for multi-core computers
-if (detectCores() > 1){
-  num_core <- detectCores() - 1
-  pl <- makeCluster(num_core)
-  registerDoParallel(pl)
-}
+## Step 1: Load and Transform Data
 
+Stock pricing data can be loaded directly from Yahoo Finance using 'getSymbols' function from 'tidyquant' package.
+
+```{r}
 # loading stock pricing data
 stock_raw <- getSymbols(Symbols = 'SPY', auto.assign = FALSE) %>%
   `colnames<-`(c('Open', 'High', 'Low', 'Close', 'Volume', 'Adjusted_Close'))
+```
 
+We can plot historic SPY price data:
+
+```{r, echo=FALSE}
+plot(stock_raw$Close, type = 'l')
+```
+
+This project will be focusing on predicting directions, a binary value of 1 or 0, with 1 meaning stock moves up. Therefore, the absolute value of the stock price isn't that important, it's the relationship between pricing data that we will be focusing on.
+
+The following code create relationships between pricing changes and create prediction targets.
+
+```{r}
 # Compute price changes and create prediction target (y)
 stock <- stock_raw %>%
   data.frame() %>%
@@ -43,26 +54,151 @@ stock <- stock_raw %>%
   mutate(direction = NULL) # remove the known "direction" column.
 ```
 
-## Step 1: Transform data and create predictors
+Here's a snippet of the transformed data:
 
-Pricing data for SPY will be used as an example for this project, with date range from 2007 to 2024. Below plot showing price changes of the stock, with the upper boundary indicating original price, while lower boundary indicating adjusted price, taking into account of dividends. Since this project will be predicting price movement, the original (unadjusted) price data will be used.
-
-```{r, echo=FALSE}
-plot(stock$Close, type = 'l')
+```{r}
+head(stock)
 ```
 
-Currently this is a timeseries data, but in this analysis we will want to convert it so that each data point is unrelated to time. To do this, the price changes and volume changes have been converted to percentages related to the previous day or average of the past few days.
+## Step 2: Spliting Data
 
-Here is a plot to see if there is any relationship between price change and trading volume:
+Since stock pricing is a time-series data, we want to split the data into training and testing sets before creating more predictors. A lot of the predictors will be based on averaging certain period of past data, therefore if predictors are created before spliting data, it's possible that information from training data could leak into testing data due to averaging.
 
-Clearly, not much relationship at all....
+The code below splits data into training set for model training, ensemble_test set for ensemble models and select the best ensembling method, and final_test set for final evaluation.
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+# split data before creating predictors
+train <- stock[1:3000, ]
+ensemble_test <- stock[3001:4000, ]
+final_test <- stock[4001:nrow(stock), ]
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Step 3: Generator Predictors
+
+Directly using daily stock data as predictors probably won't be very helpful, since it lacks relationship to past data. Therefore in this step, we will generate predictors based on rolling averages and recent high/lows of historic data from certain time periods.
+
+```{r}
+# Compute rolling price averages and recent high/lows
+moving_avg_n <- c(10, 20, 40, 80)
+
+rolling <- function(x){
+  data <- x
+  moving_avg <- list()
+  for (n in moving_avg_n){
+    # Rolling average price changes
+    col_name <- paste('sma', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - SMA(data$Close, n = n)) * 100 / data$Close
+    col_name <- paste('ema', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - EMA(data$Close, n = n)) * 100 / data$Close
+    col_name <- paste('evwma', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - EVWMA(data$Close, data$Volume, n = n)) * 100 / data$Close
+    
+    # Rolling min/max
+    col_name <- paste('high', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - rollmax(data$High, n, fill = NA, align = 'right')) / data$Close
+    col_name <- paste('low', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Close - -rollmax(-data$Low, n, fill = NA, align = 'right')) / data$Close
+    
+    # Rolling volume
+    col_name <- paste('vol', n, sep = '_')
+    moving_avg[[col_name]] <- (data$Volume - rollmean(data$Volume, n, fill = NA, align = 'right')) / data$Volume
+    
+    # Rolling standard deviation (volatility)
+    col_name <- paste('sd', n, sep = '_')
+    moving_avg[[col_name]] <- roll_sd(data$change_pct, n)
+  }
+  x <- x %>%
+    cbind(moving_avg)
+  return(x)
+}
+
+train <- rolling(train)
+final_test <- rolling(final_test)
+ensemble_test <- rolling(ensemble_test)
+```
+
+Next, we remove the columns containing absolute values of the stock pricing data, and only leave relavent pricing data as predictors.
+
+```{r}
+# Filter out predictor columns
+filt_columns <- function(x){
+  x <- x %>%
+    select(-c('Open', 'Close', 'High', 'Low', 'Volume', 'Adjusted_Close')) %>%
+    na.omit()
+  return(x)
+}
+
+train <- filt_columns(train)
+final_test <- filt_columns(final_test)
+ensemble_test <- filt_columns(ensemble_test)
+```
+
+## Step 4: Model Training
+
+This step will train some models using training dataset.
+
+**Caution:** This step will take some time to run, depends on computer performance.
+
+This optional code below can use multiple cores to speed up training process:
+
+```{r}
+# setup parallel computation for multi-core computers
+if (detectCores() > 1){
+  num_core <- detectCores() - 1
+  pl <- makeCluster(num_core)
+  registerDoParallel(pl)
+} else {
+  registerDoSEQ()
+}
+```
+
+Total of (6) models will be trained:
+
+```{r message=FALSE, warning=FALSE}
+# setup training control
+control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 300, fixedWindow = FALSE, skip = 49)
+
+# train some models
+fit <- list()
+fit[['knn']] <- train(y ~ ., data = train, trControl = control, method = 'knn', tuneGrid = data.frame(k = seq(1, 15, 2)))
+fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 2)))
+fit[['glm']] <- train(y ~ ., data = train, trControl = control, method = 'glm')
+fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
+fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.05, 0.005)))
+fit[['earth']] <- train(y ~ ., data = train, trControl = control, method = 'earth')
+```
+
+## Step 5: Ensemble Models
+
+This step will compare prediction results from 6 models and using the majority to decide which prediction to be used. 
+
+This code below creates a function that takes in the number of models to use, and output the prediction results. 
+
+For accuracy metrics, we should focus more on precision, instead of overall accuracy. Also, only using accuracy to test performance may not work as intended, because the magnitude of price changes were ignored. 
+
+Therefore, this function also calculates the dollar amount the stock has changed during the testing data period, and compared to the predicted result ('portfolio' vs 'buy_and_hold' metrics).
+
+result <- function(x, test_data){
+  pred <- list()
+  for (f in fit){
+    pred[[f$method]] <- predict(f, test_data)
+  }
+  
+  ensemble <- pred %>%
+    data.frame() %>%
+    mutate(count = rowSums(. == 1)) %>%
+    mutate(y_hat = ifelse(count >= x, 1, 0),
+           y_hat = factor(y_hat, levels = levels(test_data$y)))
+  
+  ensemble <- cbind(test_data, ensemble) %>%
+    select(y, y_hat, change)
+  conf <- confusionMatrix(ensemble$y_hat, ensemble$y, positive = '1')
+  ensemble <- ensemble %>% 
+    mutate(y_hat = as.numeric(as.character(y_hat))) %>%
+    summarise(portfolio = sum(ensemble$change * y_hat), 
+              buy_and_hold = sum(ensemble$change),
+              precision = conf$byClass['Precision'],
+              overall_accu = conf$overall['Accuracy'])
+  
+  return(ensemble)
+}
