@@ -98,9 +98,9 @@ control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 300
 # train some models
 fit <- list()
 fit[['knn']] <- train(y ~ ., data = train, trControl = control, method = 'knn', tuneGrid = data.frame(k = seq(1, 15, 2)))
-# fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 2)))
+fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', tuneGrid = data.frame(mtry = seq(2, ncol(train), 2)))
 fit[['glm']] <- train(y ~ ., data = train, trControl = control, method = 'glm')
-# fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
+fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
 fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpart', tuneGrid = data.frame(cp = seq(0.005, 0.05, 0.005)))
 fit[['earth']] <- train(y ~ ., data = train, trControl = control, method = 'earth')
 
@@ -116,7 +116,13 @@ result <- function(x, test_data){
     data.frame() %>%
     mutate(count = rowSums(. == 1)) %>%
     mutate(y_hat = ifelse(count >= x, 1, 0),
-           y_hat = factor(y_hat, levels = levels(test_data$y)))
+           y_hat = lag(y_hat),
+           y_hat = factor(y_hat, levels = levels(test_data$y))) %>%
+    na.omit()
+  
+  test_data <- test_data %>%
+    mutate(y = lag(y)) %>%
+    na.omit()
   
   ensemble <- cbind(test_data, ensemble) %>%
     select(y, y_hat, change)
@@ -126,6 +132,7 @@ result <- function(x, test_data){
     summarise(portfolio = sum(ensemble$change * y_hat), 
               buy_and_hold = sum(ensemble$change),
               precision = conf$byClass['Precision'],
+              sensitivity = conf$byClass['Sensitivity'],
               overall_accu = conf$overall['Accuracy'])
   
   return(ensemble)
@@ -136,4 +143,4 @@ lapply(ensemble_n, function(x) result(x, ensemble_test))
 # choosing number of models based on highest precision
 
 # Final testing
-result(4, final_test)
+result(5, final_test)

@@ -157,7 +157,7 @@ if (detectCores() > 1){
 }
 ```
 
-Total of (4) models will be trained:
+Train some models:
 
 ```{r message=FALSE, warning=FALSE}
 # setup training control
@@ -168,9 +168,12 @@ control <- trainControl(method = 'timeslice', initialWindow = 500,
 fit <- list()
 fit[['knn']] <- train(y ~ ., data = train, trControl = control, method = 'knn', 
                       tuneGrid = data.frame(k = seq(1, 15, 2)))
+fit[['rf']] <- train(y ~ ., data = train, trControl = control, method = 'rf', 
+                     tuneGrid = data.frame(mtry = seq(2, ncol(train), 2)))
 fit[['glm']] <- train(y ~ ., data = train, trControl = control, method = 'glm')
 fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpart', 
                         tuneGrid = data.frame(cp = seq(0.005, 0.05, 0.005)))
+fit[['xgbTree']] <- train(y ~ ., data = train, trControl = control, method = 'xgbTree')
 fit[['earth']] <- train(y ~ ., data = train, trControl = control, method = 'earth')
 ```
 
@@ -195,7 +198,13 @@ result <- function(x, test_data){
     data.frame() %>%
     mutate(count = rowSums(. == 1)) %>%
     mutate(y_hat = ifelse(count >= x, 1, 0),
-           y_hat = factor(y_hat, levels = levels(test_data$y)))
+           y_hat = lag(y_hat),
+           y_hat = factor(y_hat, levels = levels(test_data$y))) %>%
+    na.omit()
+  
+  test_data <- test_data %>%
+    mutate(y = lag(y)) %>%
+    na.omit()
   
   ensemble <- cbind(test_data, ensemble) %>%
     select(y, y_hat, change)
@@ -205,6 +214,7 @@ result <- function(x, test_data){
     summarise(portfolio = sum(ensemble$change * y_hat), 
               buy_and_hold = sum(ensemble$change),
               precision = conf$byClass['Precision'],
+              sensitivity = conf$byClass['Sensitivity'],
               overall_accu = conf$overall['Accuracy'])
   
   return(ensemble)
@@ -220,13 +230,13 @@ lapply(ensemble_n, function(x) result(x, ensemble_test))
 
 ## Step 6: Final Testing
 
-After selecting ensemble parameters (4, in this case), we will test it on the final testing dataset, using code below:
+After selecting ensemble parameters (5, in this case), we will test it on the final testing dataset, using code below:
 
 ```{r}
 # Final testing
-result(4, final_test)
+result(5, final_test)
 ```
 
 ## Conclusion
 
-It's clear the accuracy is fairly low, but nonetheless still has some merit since the predicted monetary return is higher than "buy_and_hold" strategy. The prediction method can potentially be improved by selecting / excluding some models, adding more predictors of different nature, adding pricing data from other stocks/instruments, and using higher resolution data.
+It's clear the accuracy is low, and seems very inconsistent (performance from ensemble_test dataset do not translate well to final_test dataset). The prediction method can potentially be improved by selecting / excluding some models, adding more predictors, adding pricing data from other stocks/instruments, and using higher resolution data.
