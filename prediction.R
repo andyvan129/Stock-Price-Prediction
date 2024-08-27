@@ -7,10 +7,13 @@ for (pack in packages) {
   library(pack, character.only = TRUE)
 }
 
-# setup parallel computation
-num_core <- detectCores() - 1
-pl <- makeCluster(num_core)
-registerDoParallel(pl)
+# setup parallel computation for multi-core computers
+if (detectCores() > 1){
+  num_core <- detectCores() - 1
+  pl <- makeCluster(num_core)
+  registerDoParallel(pl)
+}
+
 
 rm(pack, packages, num_core)
 
@@ -32,7 +35,8 @@ stock <- stock_raw %>%
 
 # split data before creating predictors (to avoid data leakage)
 train <- stock[1:3000, ]
-final_test <- stock[3001:nrow(stock), ]
+ensemble_test <- stock[3001:4000, ]
+final_test <- stock[4001:nrow(stock), ]
 
 
 # Compute rolling price averages and recent high/lows
@@ -71,7 +75,7 @@ rolling <- function(x){
 
 train <- rolling(train)
 final_test <- rolling(final_test)
-
+ensemble_test <- rolling(ensemble_test)
 
 
 # Filter out predictor columns
@@ -84,7 +88,7 @@ filt_columns <- function(x){
 
 train <- filt_columns(train)
 final_test <- filt_columns(final_test)
-
+ensemble_test <- filt_columns(ensemble_test)
 
 # setup training control
 control <- trainControl(method = 'timeslice', initialWindow = 500, horizon = 300, fixedWindow = FALSE, skip = 49)
@@ -99,31 +103,37 @@ fit[['rpart']] <- train(y ~ ., data = train, trControl = control, method = 'rpar
 fit[['earth']] <- train(y ~ ., data = train, trControl = control, method = 'earth')
 
 # ensemble models and final testing
-ensemble_models <- 5
-test_data <- final_test
-
-pred <- list()
-for (f in fit){
-  pred[[f$method]] <- predict(f, test_data)
-}
-
+test_data <- ensemble_test
 
 result <- function(x){
+  pred <- list()
+  for (f in fit){
+    pred[[f$method]] <- predict(f, test_data)
+  }
+  
   ensemble <- pred %>%
     data.frame() %>%
     mutate(count = rowSums(. == 1)) %>%
     mutate(y_hat = ifelse(count >= x, 1, 0),
            y_hat = factor(y_hat, levels = levels(test_data$y)))
   
-  confusionMatrix(ensemble$y_hat, test_data$y, positive = '1')
+  ensemble <- cbind(test_data, ensemble) %>%
+    select(y, y_hat, change)
+  conf <- confusionMatrix(ensemble$y_hat, ensemble$y, positive = '1')
+  ensemble <- ensemble %>% 
+    mutate(y_hat = as.numeric(as.character(y_hat))) %>%
+    summarise(portfolio = sum(ensemble$change * y_hat), 
+              buy_and_hold = sum(ensemble$change),
+              precision = conf$byClass['Precision'],
+              overall_accu = conf$overall['Accuracy'])
   
-  
-  # testing dollar returns using trained models
-  test_data %>%
-    mutate(y_hat = ensemble$y_hat,
-           y_hat = as.numeric(as.character(y_hat))) %>%
-    summarise(predicted_portfolio = sum(change * y_hat), buy_and_hold = sum(change))
+  return(ensemble)
 }
 
-ensemble_n <- seq(1, length(pred), 1)
+ensemble_n <- seq(1, length(fit), 1)
 lapply(ensemble_n, result)
+# choosing number of models based on highest precision
+
+# Final testing
+test_data <- final_test
+result(6)
